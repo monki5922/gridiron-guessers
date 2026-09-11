@@ -1,0 +1,77 @@
+# Records a wheel result. The page can't write to the repo - that would mean a
+# push token in public JavaScript - so it opens a prefilled issue instead and
+# this commits it. Only the repo owner can trigger it.
+name: Record wheel roll
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  record:
+    if: startsWith(github.event.issue.title, 'roll:')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply the roll
+        id: apply
+        env:
+          TITLE: ${{ github.event.issue.title }}
+          ACTOR: ${{ github.event.issue.user.login }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys, pathlib
+
+          if os.environ["ACTOR"] != os.environ["OWNER"]:
+              print(f"::error::{os.environ['ACTOR']} is not the repo owner - ignoring")
+              sys.exit(1)
+
+          m = re.fullmatch(r"roll:\s*week\s*(\d+)\s*=\s*(\d+)", os.environ["TITLE"].strip())
+          if not m:
+              print("::error::title must look like 'roll: week 2 = 6'")
+              sys.exit(1)
+          week, cid = m.group(1), int(m.group(2))
+          if not (1 <= int(week) <= 17) or not (1 <= cid <= 17):
+              print("::error::week and challenge id must both be 1-17")
+              sys.exit(1)
+
+          p = pathlib.Path("docs/data/rolls.json")
+          doc = json.loads(p.read_text())
+          rolls = doc.setdefault("rolls", {})
+
+          if week in rolls:
+              print(f"::error::week {week} is already rolled ({rolls[week]}) - edit the file by hand to change it")
+              sys.exit(1)
+          if cid in rolls.values():
+              print(f"::error::challenge {cid} has already been used this season")
+              sys.exit(1)
+
+          rolls[week] = cid
+          doc["rolls"] = {k: rolls[k] for k in sorted(rolls, key=int)}
+          p.write_text(json.dumps(doc, indent=2) + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"week={week}\nchallenge={cid}\n")
+          print(f"recorded week {week} -> challenge {cid}")
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name "wheel-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/data/rolls.json
+          git diff --cached --quiet || git commit -m "Week ${{ steps.apply.outputs.week }}: challenge ${{ steps.apply.outputs.challenge }}"
+          git push
+
+      - name: Close the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment ${{ github.event.issue.number }} \
+            --body "Recorded week ${{ steps.apply.outputs.week }} → challenge ${{ steps.apply.outputs.challenge }}. It'll show on the site once Pages redeploys."
+          gh issue close ${{ github.event.issue.number }}

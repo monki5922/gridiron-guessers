@@ -56,8 +56,11 @@ header { margin-bottom: 28px; display: flex; align-items: flex-start;
         background: var(--accent-soft); color: var(--accent); }
 #spin:disabled { opacity: .55; cursor: default; }
 #wheelnote { margin-top: 11px; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
-#wheelnote code { background: var(--bg); border: 1px solid var(--line);
-                  border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+a.record { display: inline-block; font-weight: 650; font-size: 13.5px;
+           padding: 9px 17px; border-radius: 999px; text-decoration: none;
+           border: 1px solid var(--gold); color: var(--gold); background: var(--gold-soft); }
+a.record:hover { filter: brightness(1.06); }
+.recordhint { display: block; margin-top: 9px; }
 tr.unrolled .wk { color: var(--muted); }
 .total td { border-top: 2px solid var(--line); font-weight: 700; }
 
@@ -542,7 +545,12 @@ const localRolls = () => { try { return JSON.parse(localStorage.getItem(ROLL_KEY
 const saveLocalRoll = (wk, id) => { try {
   const r = localRolls(); r[wk] = id; localStorage.setItem(ROLL_KEY, JSON.stringify(r)); } catch {} };
 
-const REPO_EDIT = 'https://github.com/monki5922/gridiron-guessers/edit/main/docs/data/rolls.json';
+const REPO = 'monki5922/gridiron-guessers';
+const recordUrl = (week, pick) => `https://github.com/${REPO}/issues/new?` + new URLSearchParams({
+  title: `roll: week ${week} = ${pick.id}`,
+  body: `Week ${week} landed on **#${pick.id} ${pick.name}** — ${pick.note}\n\n` +
+        `Submitting this issue commits it to docs/data/rolls.json and closes itself.`,
+}).toString();
 
 /* The wheel. Anyone can spin it for the next unrolled week; the result has to be
    written into docs/data/rolls.json to become official, because a page served
@@ -588,9 +596,9 @@ function cardWheel(L, season) {
       card.querySelector('#wheelout').innerHTML =
         `<div class="rolled">#${pick.id} ${esc(pick.name)}</div><div class="rollednote">${esc(pick.note)}</div>`;
       card.querySelector('#wheelnote').innerHTML =
-        `Only you can see this so far. To make it official for the league, add
-         <code>"${next.week}": ${pick.id}</code> to
-         <a href="${REPO_EDIT}" target="_blank" rel="noopener">rolls.json</a> and commit.`;
+        `<a class="record" href="${recordUrl(next.week, pick)}" target="_blank" rel="noopener">Record it for the league →</a>
+         <span class="recordhint">Opens a prefilled GitHub issue; submitting it commits the roll
+         and the site picks it up on the next deploy. Until then only you can see this result.</span>`;
       card.querySelector('#spin').disabled = false;
       spinning = false;
     }, 4300);
