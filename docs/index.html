@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Gridiron Guessers</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #14171a; --muted: #667085;
+  --line: #e3e6ea; --accent: #1a7f5a; --accent-soft: #e6f4ee; --gold: #9a6b00;
+  --gold-soft: #fdf3dd; --radius: 14px;
+  --bar: #9a6b00; --track: #ece7dc; --wire: #c3ccd6;
+  --wheel-a: #1a7f5a; --wheel-b: #146144;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1114; --panel: #171b20; --ink: #e8eaed; --muted: #939ba7;
+    --line: #262c33; --accent: #3ecf8e; --accent-soft: #12281f; --gold: #e5b95c;
+    --gold-soft: #2a2214;
+    --bar: #b8882c; --track: #23262b; --wire: #3d4650;
+    --wheel-a: #2f7f5f; --wheel-b: #1d5c45;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; }
+header { margin-bottom: 28px; display: flex; align-items: flex-start;
+          justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+#refresh { font: inherit; font-size: 13px; font-weight: 600; padding: 8px 15px;
+           border-radius: 999px; cursor: pointer; border: 1px solid var(--line);
+           background: var(--panel); color: var(--ink); white-space: nowrap; }
+#refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+#refresh:disabled { opacity: 0.55; cursor: default; }
+.err { color: #c0392b; font-size: 13px; }
+@media (prefers-color-scheme: dark) { .err { color: #ff8a7a; } }
+.money { font-variant-numeric: tabular-nums; font-weight: 650; }
+.wheelwrap { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; }
+.wheelbox { position: relative; width: 190px; height: 190px; flex: 0 0 auto; }
+.disc { width: 100%; height: 100%; border-radius: 50%;
+        border: 3px solid var(--panel); box-shadow: 0 0 0 1px var(--line); }
+.pointer { position: absolute; top: -7px; left: 50%; transform: translateX(-50%);
+           width: 0; height: 0; z-index: 2;
+           border-left: 9px solid transparent; border-right: 9px solid transparent;
+           border-top: 15px solid var(--gold); }
+.wheelside { flex: 1 1 240px; min-width: 220px; }
+.wheelout { min-height: 52px; margin-bottom: 12px; color: var(--muted); font-size: 13.5px; }
+.rolled { font-size: 19px; font-weight: 650; color: var(--ink); letter-spacing: -0.01em; }
+.rollednote { font-size: 13px; color: var(--muted); margin-top: 3px; }
+#spin { font: inherit; font-size: 14px; font-weight: 650; padding: 10px 20px;
+        border-radius: 999px; cursor: pointer; border: 1px solid var(--accent);
+        background: var(--accent-soft); color: var(--accent); }
+#spin:disabled { opacity: .55; cursor: default; }
+#wheelnote { margin-top: 11px; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+#wheelnote code { background: var(--bg); border: 1px solid var(--line);
+                  border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+tr.unrolled .wk { color: var(--muted); }
+.total td { border-top: 2px solid var(--line); font-weight: 700; }
+
+/* Ranked winnings chart. One series -> one fill; bar length is the only
+   magnitude channel, and values stay in text tokens, never the fill colour. */
+.pot { margin: -4px 0 18px; }
+.potline { display: flex; justify-content: space-between; align-items: baseline;
+           font-size: 12.5px; color: var(--muted); margin-bottom: 7px; gap: 12px; }
+.potline b { color: var(--ink); font-size: 14px; font-variant-numeric: tabular-nums; }
+.wrow { display: grid; align-items: center; gap: 12px;
+        grid-template-columns: 20px minmax(132px, 1.3fr) minmax(70px, 1.7fr) 66px;
+        padding: 9px 0; border-top: 1px solid var(--line); }
+.wrow.first { border-top: 0; }
+.wrow .who { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.wrow .meta { color: var(--muted); font-size: 11.5px; margin-top: 1px; }
+.wrow .amt { text-align: right; font-variant-numeric: tabular-nums;
+             font-weight: 650; font-size: 14px; }
+.wrow .amt.zero { color: var(--muted); font-weight: 500; }
+.track, .potbar { background: var(--track); border-radius: 0 5px 5px 0; }
+.track { height: 10px; }
+.potbar { height: 8px; }
+.fill { height: 100%; background: var(--bar); width: 0;
+        border-radius: 0 4px 4px 0;              /* square at baseline, rounded data-end */
+        transition: width 900ms cubic-bezier(.22,.85,.3,1); }
+.lit .fill { width: var(--w); }
+
+/* Nobody-won-anything rows: the bar makes a run at it, loses its nerve a few
+   times and settles back on zero. Damped, so it reads as giving up. */
+@keyframes nerve {
+  0%   { width: 0; }
+  16%  { width: 9%; }
+  31%  { width: 1.5%; }
+  45%  { width: 5.5%; }
+  58%  { width: 1%; }
+  70%  { width: 3.2%; }
+  81%  { width: 0.6%; }
+  90%  { width: 1.5%; }
+  100% { width: 0; }
+}
+.lit .fill.nil { animation: nerve 1600ms cubic-bezier(.33,.68,.42,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .fill { transition: none; }
+  .lit .fill.nil { animation: none; }
+}
+@media (max-width: 560px) {
+  .wrow { grid-template-columns: 18px 1fr 62px; }
+  .wrow .track { grid-column: 2 / 4; }
+}
+h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
+.sub { color: var(--muted); font-size: 13px; }
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+}
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+     color: var(--muted); margin: 0 0 14px; font-weight: 600; }
+.prizes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 560px) { .prizes { grid-template-columns: 1fr; } }
+.prize { border-radius: 10px; padding: 16px; border: 1px solid transparent; }
+.prize.hs { background: var(--gold-soft); border-color: var(--gold); }
+.prize.ch { background: var(--accent-soft); border-color: var(--accent); }
+.prize .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+                font-weight: 600; opacity: 0.85; margin-bottom: 8px; }
+.prize.hs .label { color: var(--gold); }
+.prize.ch .label { color: var(--accent); }
+.prize .who { font-size: 20px; font-weight: 650; letter-spacing: -0.01em;
+              word-break: break-word; }
+.prize .detail { font-size: 13px; color: var(--muted); margin-top: 4px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+     color: var(--muted); font-weight: 600; padding: 0 8px 8px; }
+th.n, td.n { text-align: right; }
+td { padding: 9px 8px; border-top: 1px solid var(--line); }
+tr.win td { font-weight: 650; }
+tr.win td:first-child::after {
+  content: "won"; margin-left: 8px; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent);
+  background: var(--accent-soft); padding: 2px 6px; border-radius: 4px;
+}
+.rank { color: var(--muted); width: 28px; }
+nav { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+nav button {
+  font: inherit; font-size: 13px; padding: 6px 13px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+}
+nav button:hover { color: var(--ink); }
+nav button[aria-current="true"] {
+  background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 600;
+}
+.empty { color: var(--muted); text-align: center; padding: 40px 20px; }
+.empty strong { display: block; color: var(--ink); font-size: 16px; margin-bottom: 6px; }
+footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 32px; }
+.scroll { overflow-x: auto; }
+.sched { min-width: 520px; }
+.sched td, .sched th { vertical-align: top; }
+.sched .wk { color: var(--muted); width: 52px; white-space: nowrap; font-weight: 600; }
+.sched .title { font-weight: 600; }
+.sched .note { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.sched tr.done { color: var(--muted); }
+.sched tr.now { background: var(--accent-soft); }
+.sched tr.now .wk { color: var(--accent); }
+.pending { color: var(--muted); }
+.br { position: relative; display: grid; align-items: stretch; gap: 0 24px;
+      grid-template-columns: repeat(3, minmax(148px, 1fr)); min-width: 520px; }
+.col > h3 { text-align: left; margin-bottom: 12px; }
+.col > h3 span { display: block; margin-top: 3px; color: var(--muted);
+                 font-weight: 500; text-transform: none; letter-spacing: 0; }
+.games { flex: 1; display: flex; flex-direction: column;
+         justify-content: space-around; gap: 18px; }
+.m.bye { border-style: dashed; background: transparent; display: flex;
+         align-items: center; justify-content: space-between; }
+.m.bye .team { border: 0; }
+.m.bye .byelabel { padding: 10px 11px; font-size: 11px; font-weight: 600;
+                   letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.m.final.gold { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+.m.final.gold .cap { color: var(--gold); background: var(--gold-soft); }
+.brlines { position: absolute; inset: 0; width: 100%; height: 100%;
+           pointer-events: none; overflow: visible; }
+.brlines path { fill: none; stroke: var(--wire); stroke-width: 1.5;
+                stroke-linejoin: round; }
+.col { display: flex; flex-direction: column; justify-content: center; gap: 22px; }
+.col > h3 { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+            color: var(--muted); margin: 0; font-weight: 600; text-align: center; }
+.m { border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+     background: var(--panel); }
+.m .cap { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+          color: var(--muted); padding: 5px 11px; background: var(--bg);
+          border-bottom: 1px solid var(--line); font-weight: 600; }
+.m .team { display: flex; align-items: center; gap: 8px; padding: 10px 11px;
+           font-size: 13.5px; }
+.m .team + .team { border-top: 1px solid var(--line); }
+.m .slot { color: var(--muted); font-style: italic; font-size: 12.5px; }
+.m .team.win { background: var(--accent-soft); font-weight: 650; }
+
+.m .pts { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted);
+            font-size: 12.5px; }
+.m.final.bowl { border-color: #a04b3c; box-shadow: 0 0 0 3px rgba(160,75,60,.13); }
+.m.final.bowl .cap { color: #a04b3c; background: rgba(160,75,60,.1); }
+@media (prefers-color-scheme: dark) {
+  .m.final.bowl { border-color: #d4705c; box-shadow: 0 0 0 3px rgba(212,112,92,.12); }
+  .m.final.bowl .cap { color: #d4705c; background: rgba(212,112,92,.12); }
+}
+.m .note2 { padding: 8px 11px; font-size: 12px; color: var(--muted);
+            border-top: 1px solid var(--line); }
+.consolhead { flex: 1 0 100%; font-size: 11px; text-transform: uppercase;
+              letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.consol { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 22px;
+          padding-top: 18px; border-top: 1px solid var(--line); }
+.consol .m { flex: 1 1 200px; }
+.chip { font-size: 10px; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.05em; padding: 2px 6px; border-radius: 4px;
+        margin-left: 8px; white-space: nowrap; }
+.chip.up { color: var(--accent); background: var(--accent-soft); }
+.chip.man { color: var(--gold); background: var(--gold-soft); }
+.won { color: var(--accent); font-weight: 650; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Gridiron Guessers</h1>
+      <div class="sub" id="sub">Loading…</div>
+    </div>
+    <button id="refresh" disabled>Refresh</button>
+  </header>
+  <div id="app"></div>
+  <footer>Updated automatically every Tuesday morning from Sleeper's final numbers.</footer>
+</div>
+
+<script>
+/* Everything on this page is computed in the browser from Sleeper's public API.
+   A week is settled once its Tuesday 6am PT lock has passed and scores exist -
+   the same moment the old cron job used to run. */
+const LEAGUE_ID = '1385481082329112576';
+const API = 'https://api.sleeper.app/v1';
+/* Gridiron Guessers: no weekly high-score prize - the side challenge is the
+   only weekly money, $10 a week for all 17 weeks. 100+60+30 + 10*17 = 360,
+   which is exactly 12 buy-ins. */
+const HIGH_SCORE_PRIZE = 0, CHALLENGE_PRIZE = 10.00, SEASON_WEEKS = 17;
+const BUY_IN = 30.00, LEAGUE_SIZE = 12;
+const SEASON_PRIZES = { 1: 100, 2: 60, 3: 30 };
+const HAS_HIGH_SCORE = HIGH_SCORE_PRIZE > 0;
+const POS_KEY = 'ffp.positions.v1', SNAP_KEY = 'ffp.snapshot.v1';
+
+const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstChild; };
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = (n) => '$' + n.toFixed(2).replace(/\.00$/, '');   // labels: $5, $2.50
+const usd = (n) => '$' + n.toFixed(2);                          // columns: always 2dp
+const n2 = (v) => v.toFixed(2);
+const app = document.getElementById('app');
+const sub = document.getElementById('sub');
+const btn = document.getElementById('refresh');
+
+const j = (u) => fetch(u, { cache: 'no-store' })
+  .then(r => { if (!r.ok) throw new Error(`${u} -> ${r.status}`); return r.json(); });
+
+/* ---- when does week w lock? first Tuesday after kickoff, then weekly ---- */
+function weekLock(seasonStart, w) {
+  const d = new Date(seasonStart + 'T00:00:00Z');
+  do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() !== 2);
+  d.setUTCDate(d.getUTCDate() + 7 * (w - 1));
+  d.setUTCHours(13, 0, 0, 0);              // 6am PT
+  return d;
+}
+
+/* ---- positions: /players/nfl is ~14MB, so keep only pid -> position ---- */
+async function loadPositions(force) {
+  if (!force) try {
+    const c = JSON.parse(localStorage.getItem(POS_KEY));
+    if (c && c.map && Date.now() - c.at < 7 * 864e5) return c.map;
+  } catch {}
+  const all = await j(`${API}/players/nfl`);
+  const map = {};
+  for (const pid in all) { const p = all[pid] && all[pid].position; if (p) map[pid] = p; }
+  try { localStorage.setItem(POS_KEY, JSON.stringify({ at: Date.now(), map })); } catch {}
+  return map;
+}
+
+/* ------------------------------- league -------------------------------- */
+async function loadLeague() {
+  const [state, league, users, rosters] = await Promise.all([
+    j(`${API}/state/nfl`), j(`${API}/league/${LEAGUE_ID}`),
+    j(`${API}/league/${LEAGUE_ID}/users`), j(`${API}/league/${LEAGUE_ID}/rosters`)]);
+
+  const uname = {}; users.forEach(u => uname[u.user_id] = u.display_name);
+  const names = {}; rosters.forEach(r => names[r.roster_id] = uname[r.owner_id] || 'unknown');
+  const slots = league.roster_positions.filter(p => p !== 'BN');
+
+  const upto = Math.min(SEASON_WEEKS, Math.max(state.week, 1));
+  const mws = await Promise.all(Array.from({ length: upto }, (_, i) =>
+    j(`${API}/league/${LEAGUE_ID}/matchups/${i + 1}`).catch(() => [])));
+  const weeks = {}; mws.forEach((m, i) => weeks[i + 1] = m || []);
+
+  let [pos, bracket, losers] = await Promise.all([
+    loadPositions(),
+    j(`${API}/league/${LEAGUE_ID}/winners_bracket`).catch(() => []),
+    j(`${API}/league/${LEAGUE_ID}/losers_bracket`).catch(() => [])]);
+
+  // A player signed since the map was cached would have no position, and would be
+  // silently skipped by the Top QB / RB / WR and K+DEF challenges. If any started
+  // player is unknown, the map is stale - refetch it rather than score a week wrong.
+  const unknown = Object.values(weeks).some(ms =>
+    ms.some(m => (m.starters || []).some(pid => pid && !pos[pid])));
+  if (unknown) pos = await loadPositions(true);
+
+  const rollFile = await fetch('data/rolls.json', { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : null).catch(() => null);
+  const rolls = {};
+  Object.entries((rollFile && rollFile.rolls) || {}).forEach(([w, id]) => rolls[Number(w)] = id);
+  Object.entries(localRolls()).forEach(([w, id]) => { if (!rolls[w]) rolls[w] = id; });
+
+  const L = { state, league, names, slots, weeks, pos, bracket, losers, rosters, rolls };
+  L.extras = await loadExtras(L, rolls);
+  return L;
+}
+
+/* ----------------------------- challenges ------------------------------ */
+const starterPts = (m) => (m.starters || []).map(pid => [pid, (m.players_points || {})[pid] ?? 0]);
+const played = (ms) => ms.filter(m => m.points > 0);
+const benchPts = (m) => { const s = new Set(m.starters || []);
+  return Object.entries(m.players_points || {}).filter(([pid]) => !s.has(pid)); };
+
+function pairs(ms) {
+  const by = {}; ms.forEach(m => (by[m.matchup_id] = by[m.matchup_id] || []).push(m));
+  return Object.values(by).filter(p => p.length === 2)
+    .map(p => { const [a, b] = [...p].sort((x, y) => y.points - x.points); return [a, b, a.points - b.points]; });
+}
+
+const FLEX_ELIG = { FLEX: ['RB','WR','TE'], SUPER_FLEX: ['QB','RB','WR','TE'],
+                    REC_FLEX: ['WR','TE'], WRRB_FLEX: ['RB','WR'], IDP_FLEX: [] };
+
+function optimal(m, slots, pos) {
+  const pool = { ...(m.players_points || {}) };
+  let total = 0; const flex = [];
+  const take = (ok) => {
+    let best = null;
+    for (const pid in pool) if (ok(pos[pid] || '?') && (best === null || pool[pid] > pool[best])) best = pid;
+    if (best !== null) { total += pool[best]; delete pool[best]; }
+  };
+  for (const s of slots) { if (FLEX_ELIG[s]) { flex.push(s); continue; } take(p => p === s); }
+  for (const s of flex) { const el = FLEX_ELIG[s]; take(p => el.includes(p)); }
+  return total;
+}
+
+const topPos = (position) => (L, ms) => ms.map(m => ({
+  name: L.names[m.roster_id],
+  value: Math.max(0, ...starterPts(m).filter(([pid]) => L.pos[pid] === position).map(([, p]) => p)) }));
+
+/* The league's 17 challenges. One is drawn on the wheel each week, so only the
+   drawn one is computed - which is also why the few that need extra Sleeper
+   endpoints stay cheap: we only fetch for the weeks that actually need them. */
+const CHALLENGES = [
+  { id: 1, name: 'The Bagel', note: 'Most starters who scored exactly 0.0 points',
+    fmt: v => `${v.toFixed(0)} bagel${v === 1 ? '' : 's'}`,
+    rows: (L, ms) => played(ms).map(m => ({ name: L.names[m.roster_id],
+      value: starterPts(m).filter(([, p]) => p === 0).length })) },
+
+  { id: 2, name: 'Human Victory Cigar', note: 'Highest-scoring player left on your bench',
+    fmt: v => `${n2(v)} pts on the bench`,
+    rows: (L, ms) => ms.map(m => ({ name: L.names[m.roster_id],
+      value: Math.max(0, ...benchPts(m).map(([, p]) => p)) })) },
+
+  { id: 3, name: 'The Photocopier', note: 'Smallest point gap between any two of your starters', low: true,
+    fmt: v => `${n2(v)} apart`,
+    rows: (L, ms) => played(ms).map(m => {
+      const p = starterPts(m).map(([, v]) => v).sort((a, b) => a - b);
+      let best = Infinity;
+      for (let i = 1; i < p.length; i++) best = Math.min(best, p[i] - p[i - 1]);
+      return { name: L.names[m.roster_id], value: isFinite(best) ? best : 0 }; }) },
+
+  { id: 4, name: 'Duds & Studs', note: 'Biggest gap between your highest- and lowest-scoring starter',
+    fmt: v => `${n2(v)} spread`,
+    rows: (L, ms) => played(ms).map(m => { const p = starterPts(m).map(([, v]) => v);
+      return { name: L.names[m.roster_id], value: p.length ? Math.max(...p) - Math.min(...p) : 0 }; }) },
+
+  { id: 5, name: 'Kicker Uprising', note: 'Most of your own RB/WR/TE starters outscored by your kicker',
+    fmt: v => `${v.toFixed(0)} outscored by the kicker`,
+    rows: (L, ms) => played(ms).map(m => { const sp = starterPts(m);
+      const k = Math.max(0, ...sp.filter(([pid]) => L.pos[pid] === 'K').map(([, p]) => p));
+      return { name: L.names[m.roster_id],
+        value: sp.filter(([pid, p]) => ['RB','WR','TE'].includes(L.pos[pid]) && p < k).length }; }) },
+
+  { id: 6, name: "Backup's Revenge", note: 'Largest margin by which a benched player beat your starter at his position',
+    fmt: v => `${n2(v)} better off the bench`,
+    rows: (L, ms) => played(ms).map(m => { const sp = starterPts(m), bp = benchPts(m);
+      let best = 0;
+      for (const [bpid, bv] of bp) { const pos = L.pos[bpid]; if (!pos) continue;
+        for (const [spid, sv] of sp) if (L.pos[spid] === pos) best = Math.max(best, bv - sv); }
+      return { name: L.names[m.roster_id], value: best }; }) },
+
+  { id: 7, name: 'The Coin Flip', note: 'Closest single loss across the entire league that week', low: true,
+    fmt: v => `lost by ${n2(v)}`,
+    rows: (L, ms) => pairs(ms).filter(([, , mg]) => mg > 0)
+      .map(([, l, mg]) => ({ name: L.names[l.roster_id], value: mg })) },
+
+  { id: 8, name: 'Butterfingers Award', note: 'Most fumbles lost across your full roster', needs: 'stats',
+    fmt: v => `${v.toFixed(0)} fumble${v === 1 ? '' : 's'} lost`,
+    rows: (L, ms, x) => ms.map(m => ({ name: L.names[m.roster_id],
+      value: Object.keys(m.players_points || {})
+        .reduce((a, pid) => a + ((x.stats[pid] || {}).fum_lost || 0), 0) })) },
+
+  { id: 9, name: 'Everyone Chip In', note: 'Smallest point spread across your whole starting lineup', low: true,
+    fmt: v => `${n2(v)} spread`,
+    rows: (L, ms) => played(ms).map(m => { const p = starterPts(m).map(([, v]) => v);
+      return { name: L.names[m.roster_id], value: p.length ? Math.max(...p) - Math.min(...p) : 0 }; }) },
+
+  { id: 10, name: 'The Understudy', note: 'Largest margin by which your D/ST outscored one of your skill starters',
+    fmt: v => `D/ST by ${n2(v)}`,
+    rows: (L, ms) => played(ms).map(m => { const sp = starterPts(m);
+      const d = Math.max(0, ...sp.filter(([pid]) => L.pos[pid] === 'DEF').map(([, p]) => p));
+      const skill = sp.filter(([pid]) => ['QB','RB','WR','TE'].includes(L.pos[pid])).map(([, p]) => p);
+      return { name: L.names[m.roster_id], value: skill.length ? d - Math.min(...skill) : 0 }; }) },
+
+  { id: 11, name: 'Prime Time Flop', note: 'Lowest combined score from starters who played Thu/Sun night/Mon night',
+    manual: 'Sleeper does not say which game slot a player played in' },
+
+  { id: 12, name: 'Red Zone Robbery', note: 'Most fantasy points given up to an opposing D/ST',
+    manual: 'Sleeper does not attribute points conceded to a defense back to individual players' },
+
+  { id: 13, name: 'The Ghost', note: 'Lowest score by a starter who actually took the field', low: true, needs: 'stats',
+    fmt: v => `${n2(v)} from a starter who played`,
+    rows: (L, ms, x) => played(ms).map(m => {
+      const vals = starterPts(m).filter(([pid]) => ((x.stats[pid] || {}).gp || 0) > 0).map(([, p]) => p);
+      return { name: L.names[m.roster_id], value: vals.length ? Math.min(...vals) : null }; })
+      .filter(r => r.value !== null) },
+
+  { id: 14, name: 'Overtime Bonus', note: 'Most points from starters in games that went to overtime',
+    manual: 'Sleeper does not flag which games went to overtime' },
+
+  { id: 15, name: 'Waiver Wire Miracle', note: 'Highest single-week score from a player you added that same week', needs: 'tx',
+    fmt: v => `${n2(v)} from a fresh pickup`,
+    rows: (L, ms, x) => ms.map(m => { const added = x.added[m.roster_id] || new Set();
+      const pts = Object.entries(m.players_points || {}).filter(([pid]) => added.has(pid)).map(([, p]) => p);
+      return { name: L.names[m.roster_id], value: pts.length ? Math.max(...pts) : 0 }; }) },
+
+  { id: 16, name: 'The Sweep', note: "Most of your starters who outscored their counterpart on your opponent's roster",
+    fmt: v => `${v.toFixed(0)} head-to-head win${v === 1 ? '' : 's'}`,
+    rows: (L, ms) => { const by = {}; ms.forEach(m => (by[m.matchup_id] = by[m.matchup_id] || []).push(m));
+      const out = [];
+      Object.values(by).forEach(pair => { if (pair.length !== 2) return;
+        pair.forEach((me, i) => { const opp = pair[1 - i];
+          const mine = starterPts(me), theirs = starterPts(opp);
+          let n = 0;
+          mine.forEach(([, v], idx) => { const t = theirs[idx]; if (t && v > t[1]) n++; });
+          out.push({ name: L.names[me.roster_id], value: n }); }); });
+      return out; } },
+
+  { id: 17, name: 'Bench Boss', note: 'Highest total combined score from your entire bench',
+    fmt: v => `${n2(v)} bench pts`,
+    rows: (L, ms) => ms.map(m => ({ name: L.names[m.roster_id],
+      value: benchPts(m).reduce((a, [, p]) => a + p, 0) })) },
+];
+const CH_BY_ID = Object.fromEntries(CHALLENGES.map(c => [c.id, c]));
+
+function winners(rows, low) {
+  if (!rows || !rows.length) return { best: null, names: [] };
+  const vals = rows.map(r => r.value);
+  const best = low ? Math.min(...vals) : Math.max(...vals);
+  return { best, names: rows.filter(r => r.value === best).map(r => r.name) };
+}
+
+/* --------------------------- settle the season -------------------------- */
+/* Only the challenge drawn for a week is computed, so the extra endpoints a
+   couple of them need are fetched for those weeks alone. */
+async function loadExtras(L, rolls) {
+  const need = { stats: [], tx: [] };
+  for (const [wk, id] of Object.entries(rolls)) {
+    const c = CH_BY_ID[id];
+    const w = Number(wk);
+    if (!c || !c.needs) continue;
+    if (Date.now() < weekLock(L.state.season_start_date, w).getTime()) continue;
+    need[c.needs].push(w);
+  }
+  const extras = {};
+  await Promise.all([
+    ...need.stats.map(async w => {
+      const st = await j(`${API}/stats/nfl/regular/${L.state.season}/${w}`).catch(() => ({}));
+      (extras[w] = extras[w] || {}).stats = st || {};
+    }),
+    ...need.tx.map(async w => {
+      const tx = await j(`${API}/league/${LEAGUE_ID}/transactions/${w}`).catch(() => []);
+      const added = {};
+      (tx || []).forEach(t => {
+        if (!t.adds || t.status !== 'complete') return;
+        for (const [pid, rid] of Object.entries(t.adds)) (added[rid] = added[rid] || new Set()).add(pid);
+      });
+      (extras[w] = extras[w] || {}).added = added;
+    }),
+  ]);
+  return extras;
+}
+
+function settle(L) {
+  const start = L.state.season_start_date;
+  const now = Date.now();
+  const rolls = L.rolls || {};
+  const out = [];
+  for (let week = 1; week <= SEASON_WEEKS; week++) {
+    const ms = L.weeks[week] || [];
+    const lock = weekLock(start, week);
+    const scored = ms.some(m => m.points > 0);
+    const past = now >= lock.getTime();
+    const c = CH_BY_ID[rolls[week]] || null;
+    const done = past && scored && !!c;
+    let ch = { names: [], best: null }, board = [];
+    const manual = c && c.manual ? c.manual : null;
+    if (done && !manual) {
+      const x = (L.extras || {})[week] || { stats: {}, added: {} };
+      board = (c.rows(L, ms, x) || []).sort((a, b) => c.low ? a.value - b.value : b.value - a.value);
+      ch = winners(board, c.low);
+    }
+    out.push({ week, lock, past, scored, done, manual, matchups: ms,
+               challenge: c, title: c ? c.name : null, note: c ? c.note : null,
+               fmt: c && c.fmt ? c.fmt : (v => n2(v)),
+               high: { names: [], best: null }, chal: ch, board });
+  }
+  return out;
+}
+
+function winningsTable(L, season) {
+  const t = {};
+  const row = (n) => (t[n] = t[n] || { name: n, high: 0, chal: 0, total: 0, best: 0 });
+  Object.values(L.names).forEach(row);
+  for (const w of season) {
+    if (!w.done) continue;
+    for (const m of w.matchups) { const r = row(L.names[m.roster_id]); r.best = Math.max(r.best, m.points); }
+    const add = (list, prize, key) => {
+      if (!list.length) return;
+      const share = prize / list.length;
+      list.forEach(n => { const r = row(n); r[key] += 1; r.total += share; });
+    };
+    add(w.high.names, HIGH_SCORE_PRIZE, 'high');
+    add(w.chal.names, CHALLENGE_PRIZE, 'chal');
+  }
+  return Object.values(t).sort((a, b) => b.total - a.total || b.best - a.best || a.name.localeCompare(b.name));
+}
+
+/* ------------------------------- render -------------------------------- */
+const ROLL_KEY = 'gg.localRolls.v1';
+const localRolls = () => { try { return JSON.parse(localStorage.getItem(ROLL_KEY)) || {}; } catch { return {}; } };
+const saveLocalRoll = (wk, id) => { try {
+  const r = localRolls(); r[wk] = id; localStorage.setItem(ROLL_KEY, JSON.stringify(r)); } catch {} };
+
+const REPO_EDIT = 'https://github.com/monki5922/gridiron-guessers/edit/main/docs/data/rolls.json';
+
+/* The wheel. Anyone can spin it for the next unrolled week; the result has to be
+   written into docs/data/rolls.json to become official, because a page served
+   from GitHub Pages has no way to save anything for everyone else. */
+function cardWheel(L, season) {
+  const next = season.find(w => !w.challenge && w.week <= SEASON_WEEKS);
+  if (!next) return null;
+  const used = new Set(Object.values(L.rolls || {}).map(Number));
+  const pool = CHALLENGES.filter(c => !used.has(c.id));
+  if (!pool.length) return null;
+
+  const card = $(`<div class="card wheelcard">
+    <h2>Week ${next.week} wheel · ${pool.length} challenge${pool.length === 1 ? '' : 's'} left</h2>
+    <div class="wheelwrap">
+      <div class="wheelbox"><div class="pointer"></div><div class="disc" id="disc"></div></div>
+      <div class="wheelside">
+        <div class="wheelout" id="wheelout">Nobody has rolled week ${next.week} yet.</div>
+        <button id="spin">Spin the wheel</button>
+        <div class="note" id="wheelnote"></div>
+      </div>
+    </div></div>`);
+
+  const disc = card.querySelector('#disc');
+  const seg = 360 / pool.length;
+  disc.style.background = `conic-gradient(${pool.map((c, i) =>
+    `${i % 2 ? 'var(--wheel-b)' : 'var(--wheel-a)'} ${i * seg}deg ${(i + 1) * seg}deg`).join(',')})`;
+
+  let spinning = false, turns = 0;
+  card.querySelector('#spin').addEventListener('click', () => {
+    if (spinning) return;
+    spinning = true;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    const idx = pool.indexOf(pick);
+    // land the pointer (at 12 o'clock) in the middle of the chosen wedge
+    turns += 5;
+    const target = turns * 360 + (360 - (idx * seg + seg / 2));
+    disc.style.transition = 'transform 4.2s cubic-bezier(.17,.67,.16,1)';
+    disc.style.transform = `rotate(${target}deg)`;
+    card.querySelector('#wheelout').textContent = 'Spinning…';
+    card.querySelector('#spin').disabled = true;
+    setTimeout(() => {
+      saveLocalRoll(next.week, pick.id);
+      card.querySelector('#wheelout').innerHTML =
+        `<div class="rolled">#${pick.id} ${esc(pick.name)}</div><div class="rollednote">${esc(pick.note)}</div>`;
+      card.querySelector('#wheelnote').innerHTML =
+        `Only you can see this so far. To make it official for the league, add
+         <code>"${next.week}": ${pick.id}</code> to
+         <a href="${REPO_EDIT}" target="_blank" rel="noopener">rolls.json</a> and commit.`;
+      card.querySelector('#spin').disabled = false;
+      spinning = false;
+    }, 4300);
+  });
+  return card;
+}
+
+function cardWeekTable(season) {
+  const next = season.find(w => w.challenge && !w.done);
+  const cell = (list) => list && list.length
+    ? `<span class="won">${esc(list.join(', '))}</span>` : '<span class="pending">—</span>';
+  const rows = season.map(w => {
+    const chip = !w.challenge ? '<span class="chip up">not rolled yet</span>'
+      : w.manual ? '<span class="chip man">commissioner settles</span>'
+      : (next && w.week === next.week ? '<span class="chip up">up next</span>' : '');
+    const body = !w.challenge
+      ? '<span class="pending">waiting on the wheel</span>'
+      : `<span class="title">#${w.challenge.id} ${esc(w.title)}</span>${chip}
+         <div class="note">${esc(w.note)}</div>
+         <div style="margin-top:4px">${w.manual
+           ? `<span class="pending">${esc(w.manual)}</span>`
+           : cell(w.chal.names) + (w.done && w.chal.best !== null && w.chal.names.length
+               ? ` <span class="pending">· ${esc(w.fmt(w.chal.best))}</span>` : '')}</div>`;
+    return `<tr class="${w.done ? 'done' : ''}${!w.challenge ? ' unrolled' : ''}">
+      <td class="wk">Wk ${w.week}</td>
+      ${HAS_HIGH_SCORE ? `<td>${cell(w.high.names)}</td>` : ''}
+      <td>${!w.challenge ? chip + body : body}</td>
+    </tr>`; }).join('');
+  return $(`<div class="card"><h2>How to win money each week</h2>
+    <div class="scroll"><table class="sched">
+      <thead><tr><th class="wk">Week</th>
+        ${HAS_HIGH_SCORE ? `<th>High score · ${money(HIGH_SCORE_PRIZE)}</th>` : ''}
+        <th>Weekly challenge · ${money(CHALLENGE_PRIZE)}</th></tr></thead>
+      <tbody>${rows}</tbody></table></div></div>`);
+}
+
+function cardLatest(L, season) {
+  const done = season.filter(w => w.done);
+  if (!done.length) return null;
+  const w = done[done.length - 1];
+  const prize = (kind, label, res, detail) => {
+    const pot = kind === 'hs' ? HIGH_SCORE_PRIZE : CHALLENGE_PRIZE;
+    const share = res.names.length > 1
+      ? ` · ${res.names.length}-way tie, ${money(pot / res.names.length)} each` : '';
+    return `<div class="prize ${kind}"><div class="label">${esc(label)} · ${money(pot)}</div>
+      <div class="who">${res.names.length ? esc(res.names.join(', ')) : 'No winner'}</div>
+      <div class="detail">${res.names.length ? esc(detail) + share : 'nobody qualified this week'}</div></div>`;
+  };
+  const scores = [...w.matchups].sort((a, b) => b.points - a.points);
+  const winSet = new Set([...w.high.names, ...w.chal.names]);
+  return $(`<div class="card"><h2>Week ${w.week} — latest result</h2>
+    <div class="prizes"${HAS_HIGH_SCORE ? '' : ' style="grid-template-columns:1fr"'}>
+      ${HAS_HIGH_SCORE ? prize('hs', 'High score', w.high, w.high.best === null ? '' : `${n2(w.high.best)} pts`) : ''}
+      ${prize('ch', w.title, w.chal, w.chal.best === null ? '' : w.fmt(w.chal.best))}
+    </div>
+    <div class="scroll" style="margin-top:18px"><table>
+      <thead><tr><th class="rank">#</th><th>Manager</th><th class="n">Points</th></tr></thead>
+      <tbody>${scores.map((m, i) => `<tr class="${winSet.has(L.names[m.roster_id]) ? 'win' : ''}">
+        <td class="rank">${i + 1}</td><td>${esc(L.names[m.roster_id])}</td>
+        <td class="n">${n2(m.points)}</td></tr>`).join('')}</tbody></table></div></div>`);
+}
+
+/* Sleeper's bracket shape, drawn the way Sleeper draws it: one column per week,
+   left to right. Both the playoffs and the toilet bowl use this - the only
+   difference is what the placement games are called. In the toilet bowl you
+   advance by losing, so its p=1 game crowns last place. */
+function bracketFigure(b, L, cfg) {
+  if (!b || !b.length) return null;
+  const seeded = L.state.week >= cfg.start;
+  const rounds = {}; b.forEach(m => (rounds[m.r] = rounds[m.r] || []).push(m));
+  const r1 = (rounds[1] || []).sort((a, z) => a.m - z.m);
+  const r2 = (rounds[2] || []).filter(m => !m.p).sort((a, z) => a.m - z.m);
+
+  const named = (rid) => (seeded && rid) ? L.names[rid] : null;
+
+  // Fixed 6-team bracket: seeds 1 and 2 sit out round 1, the top seed meets the
+  // winner of 4v5 and the second seed the winner of 3v6. Confirmed against the
+  // league's own bracket, where the 12 seed drew the 9v8 winner.
+  const R1_SEEDS = [[4, 5], [3, 6]];
+  const seedAt = (m, k) => {
+    const i = r1.indexOf(m);
+    if (i > -1 && R1_SEEDS[i]) return R1_SEEDS[i][k === 't1' ? 0 : 1];
+    const j = r2.indexOf(m);
+    if (j > -1 && k === 't1') return j + 1;          // the bye seeds, 1 then 2
+    return null;
+  };
+  // in the toilet bowl the bracket's 1 seed is the league's worst finisher
+  const place = (n) => cfg.invertSeeds ? (cfg.totalTeams + 1 - n) : n;
+  const seedText = (m, k) => {
+    const n = seedAt(m, k);
+    return n ? `${place(n)} seed` : 'seed TBD';
+  };
+
+  const slot = (m, k) => {
+    const nm = named(m[k]);
+    if (nm) return `<span>${esc(nm)}</span>`;
+    const src = m[k + '_from'] || {};
+    if (src.w) return `<span class="slot">${esc(cfg.advance)} of game ${src.w}</span>`;
+    if (src.l) return `<span class="slot">${esc(cfg.drop)} of game ${src.l}</span>`;
+    return `<span class="slot">${esc(seedText(m, k))}</span>`;
+  };
+  const team = (m, k) =>
+    `<div class="team${seeded && m.w && m.w === m[k] ? ' win' : ''}">${slot(m, k)}</div>`;
+  const match = (m, cap, cls) =>
+    `<div class="m${cls ? ' ' + cls : ''}" data-id="m${m.m}">
+       <div class="cap">${esc(cap)}</div>${team(m, 't1')}${team(m, 't2')}</div>`;
+
+  const final = (rounds[3] || []).find(m => m.p === 1);
+  const places = b.filter(m => m.p && m !== final).sort((a, z) => a.r - z.r || a.p - z.p);
+
+  // a round-2 side with no _from is a bye: that seed sat out round 1
+  const byeCard = (semi) => `<div class="m bye" data-id="bye${semi.m}">
+      <div class="team">${named(semi.t1) ? `<span>${esc(named(semi.t1))}</span>`
+        : `<span class="slot">${esc(seedText(semi, 't1'))}</span>`}</div>
+      <div class="byelabel">Bye</div></div>`;
+
+  const col1 = `<div class="col"><h3>Round 1<span>Week ${cfg.start}</span></h3>
+      <div class="games">${r2.map((semi, i) =>
+        (r1[i] ? match(r1[i], 'Game ' + r1[i].m) : '') + byeCard(semi)).join('')}</div></div>`;
+  const col2 = `<div class="col"><h3>Round 2<span>Week ${cfg.start + 1}</span></h3>
+      <div class="games">${r2.map(m => match(m, 'Game ' + m.m)).join('')}</div></div>`;
+  const col3 = `<div class="col"><h3>Finals<span>Week ${cfg.start + 2}</span></h3>
+      <div class="games">${final ? match(final, cfg.places[1], 'final ' + cfg.finalCls) : ''}</div></div>`;
+
+  const card = $(`<div class="card"><h2>${esc(cfg.title)}</h2>
+    <div class="scroll"><div class="br">
+      <svg class="brlines" xmlns="http://www.w3.org/2000/svg"></svg>
+      ${col1}${col2}${col3}
+    </div></div>
+    ${places.length ? `<div class="consol"><div class="consolhead">Placement games</div>
+      ${places.map(m => match(m, `${cfg.places[m.p] || 'Game ' + m.m} · wk ${cfg.start + m.r - 1}`)).join('')}</div>` : ''}
+    ${cfg.note ? `<div class="note" style="margin-top:14px;color:var(--muted);font-size:13px">${esc(cfg.note)}</div>` : ''}
+    </div>`);
+
+  const root = card.querySelector('.br');
+  root.__links = [];
+  r2.forEach((semi, i) => {
+    if (r1[i]) root.__links.push([`m${r1[i].m}`, `m${semi.m}`, 'lr']);
+    root.__links.push([`bye${semi.m}`, `m${semi.m}`, 'lr']);
+    if (final) root.__links.push([`m${semi.m}`, `m${final.m}`, 'lr']);
+  });
+  const draw = () => drawLinks(root);
+  requestAnimationFrame(draw);
+  if ('ResizeObserver' in window) new ResizeObserver(draw).observe(root);
+  return card;
+}
+
+function drawLinks(root) {
+  const svg = root.querySelector('svg.brlines');
+  const R = root.getBoundingClientRect();
+  if (!R.width) return;
+  const box = (id) => {
+    const el = root.querySelector(`[data-id="${id}"]`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { l: r.left - R.left, r: r.right - R.left, y: r.top - R.top + r.height / 2 };
+  };
+  const d = [];
+  for (const [from, to, dir] of (root.__links || [])) {
+    const a = box(from), z = box(to);
+    if (!a || !z) continue;
+    const [ax, zx] = dir === 'lr' ? [a.r, z.l] : [a.l, z.r];
+    const mid = (ax + zx) / 2;
+    d.push(`M${ax.toFixed(1)} ${a.y.toFixed(1)}H${mid.toFixed(1)}V${z.y.toFixed(1)}H${zx.toFixed(1)}`);
+  }
+  svg.setAttribute('viewBox', `0 0 ${R.width} ${R.height}`);
+  svg.innerHTML = d.map(p => `<path d="${p}"/>`).join('');
+}
+
+function cardBracket(L) {
+  const st = L.league.settings || {};
+  const start = st.playoff_week_start || 15;
+  const teams = st.playoff_teams || 6;
+  const total = L.league.total_rosters || (L.rosters || []).length || 12;
+  const out = [];
+  const champs = bracketFigure(L.bracket, L, {
+    start, title: `Playoffs · top ${teams} · weeks ${start}–${start + 2}`,
+    advance: 'winner', drop: 'loser', finalCls: 'gold',
+    invertSeeds: false, totalTeams: total,
+    places: { 1: 'Championship', 3: '3rd place', 5: '5th place' },
+    note: L.state.week >= start ? '' :
+      `Seeds are set after week ${start - 1}. The top two seeds get a first-round bye.`,
+  });
+  if (champs) out.push(champs);
+
+  const bowl = bracketFigure(L.losers, L, {
+    start, title: 'Toilet bowl · a tournament for last place',
+    advance: 'winner', drop: 'loser', finalCls: 'bowl',
+    invertSeeds: true, totalTeams: total,
+    places: { 1: '💩 King (Last Place)', 3: '10th place', 5: '8th place' },
+    note: L.state.week >= start ? '' :
+      `The bottom six after week ${start - 1}, with the worst two seeds on a bye.`,
+  });
+  if (bowl) out.push(bowl);
+  return out;
+}
+
+function cardWinnings(rows) {
+  const paid = rows.reduce((a, r) => a + r.total, 0);
+  const POT = BUY_IN * LEAGUE_SIZE;
+  const leader = Math.max(...rows.map(r => r.total), 0);
+
+  const row = (r, i) => {
+    const pct = leader ? (r.total / leader) * 100 : 0;
+    const share = POT ? (r.total / POT) * 100 : 0;
+    const bits = [];
+    if (HAS_HIGH_SCORE && r.high) bits.push(`${r.high} high score`);
+    if (r.chal) bits.push(`${r.chal} challenge${r.chal > 1 ? 's' : ''}`);
+    if (r.total) bits.push(`${share.toFixed(1)}% of pot`);
+    const meta = bits.length ? bits.join(' · ') : 'nothing yet';
+    const tip = `${r.name} — ${usd(r.total)}` +
+      (r.best ? ` · best week ${n2(r.best)}` : '') +
+      (bits.length ? ` · ${bits.join(', ')}` : '');
+    return `<div class="wrow${i === 0 ? ' first' : ''}" title="${esc(tip)}">
+        <div class="rank">${i + 1}</div>
+        <div><div class="who">${esc(r.name)}</div>
+             <div class="meta">${esc(meta)}</div></div>
+        <div class="track"><div class="fill${r.total ? '' : ' nil'}"
+             style="--w:${pct.toFixed(2)}%; transition-delay:${i * 55}ms;
+                    animation-delay:${i * 55}ms"></div></div>
+        <div class="amt${r.total ? '' : ' zero'}">${r.total ? usd(r.total) : usd(0)}</div>
+      </div>`;
+  };
+
+  const card = $(`<div class="card"><h2>Total winnings</h2>
+    <div class="pot">
+      <div class="potline"><span><b>${usd(paid)}</b> of ${usd(POT)} paid out</span>
+        <span>${usd(POT - paid)} still in the pot</span></div>
+      <div class="potbar"><div class="fill" style="--w:${((paid / POT) * 100).toFixed(2)}%"></div></div>
+    </div>
+    ${rows.map(row).join('')}
+    <div class="note" style="margin-top:14px;color:var(--muted);font-size:13px">
+      Bars are scaled to the current leader. Season prizes (1st ${money(SEASON_PRIZES[1])},
+      2nd ${money(SEASON_PRIZES[2])}, 3rd ${money(SEASON_PRIZES[3])}) are settled after the
+      playoffs and are not counted here.</div></div>`);
+
+  // fill on scroll-in; honour reduced-motion by painting the final state at once
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const light = (animate) => {
+    if (card.classList.contains('lit')) return;
+    card.classList.add('lit');
+    if (animate) countUp(card);
+  };
+  if (reduce || !('IntersectionObserver' in window)) {
+    light(false);
+  } else {
+    const io = new IntersectionObserver((es) => {
+      es.forEach(e => { if (e.isIntersecting) { light(true); io.disconnect(); } });
+    }, { threshold: 0.18 });
+    requestAnimationFrame(() => io.observe(card));
+    // safety net: if the observer never reports (background tab, odd embed),
+    // don't leave an empty chart on screen
+    setTimeout(() => {
+      const r = card.getBoundingClientRect();
+      if (r.top < innerHeight && r.bottom > 0) { light(false); io.disconnect(); }
+    }, 2500);
+  }
+  return card;
+}
+
+function countUp(card) {
+  card.querySelectorAll('.amt').forEach((el, i) => {
+    const target = parseFloat(el.textContent.replace(/[^0-9.]/g, ''));
+    if (!target) return;
+    const t0 = performance.now(), dur = 900, delay = i * 55;
+    const tick = (now) => {
+      const p = Math.min(1, Math.max(0, (now - t0 - delay) / dur));
+      const e = 1 - Math.pow(1 - p, 3);
+      el.textContent = usd(target * e);
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    el.textContent = usd(0);
+    requestAnimationFrame(tick);
+  });
+}
+
+/* ----------------------------- bootstrap -------------------------------- */
+function paint(L) {
+  const season = settle(L);
+  app.innerHTML = '';
+  const latest = cardLatest(L, season);
+  if (latest) app.append(latest); else app.append($(`<div class="card"><div class="empty">
+    <strong>No results yet</strong>The first week settles the Tuesday after it wraps up.</div></div>`));
+  const wheel = cardWheel(L, season); if (wheel) app.append(wheel);
+  app.append(cardWeekTable(season));
+  cardBracket(L).forEach(c => app.append(c));
+  app.append(cardWinnings(winningsTable(L, season)));
+
+  const next = season.find(w => !w.done);
+  sub.textContent = 'Live from Sleeper · checked ' +
+    new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) +
+    (next ? ` · week ${next.week} settles ${next.lock.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : '');
+  try { localStorage.setItem(SNAP_KEY, JSON.stringify({ at: Date.now() })); } catch {}
+}
+
+async function run() {
+  btn.disabled = true; btn.textContent = 'Checking…';
+  try {
+    paint(await loadLeague());
+  } catch (e) {
+    app.innerHTML = '';
+    app.append($(`<div class="card"><div class="empty"><strong>Couldn't reach Sleeper</strong>
+      <span class="err">${esc(e.message)}</span></div></div>`));
+    sub.textContent = '';
+  } finally { btn.disabled = false; btn.textContent = 'Refresh'; }
+}
+
+btn.addEventListener('click', run);
+run();
+</script>
+</body>
+</html>
