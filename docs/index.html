@@ -39,7 +39,8 @@ header { margin-bottom: 28px; display: flex; align-items: flex-start;
 .err { color: #c0392b; font-size: 13px; }
 @media (prefers-color-scheme: dark) { .err { color: #ff8a7a; } }
 .money { font-variant-numeric: tabular-nums; font-weight: 650; }
-.wheelwrap { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; }
+.wheelwrap { display: flex; gap: 26px; align-items: flex-start; flex-wrap: wrap; }
+.wheelbox, .wheelside { margin-top: 4px; }
 .wheelbox { position: relative; width: 240px; height: 240px; flex: 0 0 auto; }
 .disc { width: 100%; height: 100%; border-radius: 50%; overflow: hidden;
         box-shadow: 0 0 0 1px var(--line); }
@@ -55,7 +56,21 @@ header { margin-bottom: 28px; display: flex; align-items: flex-start;
            width: 0; height: 0; z-index: 2;
            border-left: 9px solid transparent; border-right: 9px solid transparent;
            border-top: 15px solid var(--gold); }
-.wheelside { flex: 1 1 240px; min-width: 220px; }
+.wheelside { flex: 1 1 210px; min-width: 200px; }
+.wheellist { flex: 1 1 250px; min-width: 220px; }
+.wheellist h3 { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+                color: var(--muted); font-weight: 600; margin: 0 0 9px; }
+.wheellist ol { list-style: none; margin: 0; padding: 0; }
+.wheellist li { display: flex; align-items: center; gap: 9px; padding: 4px 0;
+                font-size: 13px; }
+.wheellist li .sw { flex: 0 0 auto; width: 21px; height: 21px; border-radius: 5px;
+                    display: grid; place-items: center; color: #fff;
+                    font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.wheellist li .sw.a { background: var(--wheel-a); }
+.wheellist li .sw.b { background: var(--wheel-b); }
+.wheellist li.hit .sw { background: var(--gold); color: #1a1200; }
+.wheellist li.hit .nm { font-weight: 650; color: var(--ink); }
+.wheellist li .nm { color: var(--muted); }
 .wheelout { min-height: 52px; margin-bottom: 12px; color: var(--muted); font-size: 13.5px; }
 .rolled { font-size: 19px; font-weight: 650; color: var(--ink); letter-spacing: -0.01em; }
 .rollednote { font-size: 13px; color: var(--muted); margin-top: 3px; }
@@ -625,6 +640,12 @@ function cardWheel(L, season) {
         <button id="spin">Spin the wheel</button>
         <div class="note" id="wheelnote"></div>
       </div>
+      <div class="wheellist">
+        <h3>Still in the wheel</h3>
+        <ol id="pool">${pool.map((c, i) => `
+          <li data-id="${c.id}"><span class="sw ${i % 2 ? 'b' : 'a'}">${c.id}</span>
+            <span class="nm">${esc(c.name)}</span></li>`).join('')}</ol>
+      </div>
     </div></div>`);
 
   const disc = card.querySelector('#disc');
@@ -658,11 +679,14 @@ function cardWheel(L, season) {
     disc.style.transition = 'transform 4.2s cubic-bezier(.17,.67,.16,1)';
     disc.style.transform = `rotate(${target}deg)`;
     disc.querySelectorAll('.wedge.hit').forEach(w => w.classList.remove('hit'));
+    card.querySelectorAll('#pool li.hit').forEach(li => li.classList.remove('hit'));
     card.querySelector('#wheelout').textContent = 'Spinning…';
     card.querySelector('#spin').disabled = true;
     setTimeout(() => {
       disc.querySelectorAll('.wedge').forEach(w =>
         w.classList.toggle('hit', Number(w.dataset.id) === pick.id));
+      card.querySelectorAll('#pool li').forEach(li =>
+        li.classList.toggle('hit', Number(li.dataset.id) === pick.id));
       saveLocalRoll(next.week, pick.id);
       card.querySelector('#wheelout').innerHTML =
         `<div class="rolled">#${pick.id} ${esc(pick.name)}</div><div class="rollednote">${esc(pick.note)}</div>`;
