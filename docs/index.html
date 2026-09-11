@@ -39,6 +39,15 @@ header { margin-bottom: 28px; display: flex; align-items: flex-start;
 .err { color: #c0392b; font-size: 13px; }
 @media (prefers-color-scheme: dark) { .err { color: #ff8a7a; } }
 .money { font-variant-numeric: tabular-nums; font-weight: 650; }
+.pending-card { border: 1px solid var(--gold); }
+.pendrow { display: flex; gap: 16px; align-items: center; justify-content: space-between;
+           flex-wrap: wrap; padding: 4px 0; }
+.pendrow .note { margin-top: 3px; font-size: 12.5px; color: var(--muted); max-width: 46ch; }
+.pendacts { display: flex; gap: 9px; align-items: center; }
+button.discard { font: inherit; font-size: 13px; font-weight: 600; padding: 8px 15px;
+                 border-radius: 999px; cursor: pointer; border: 1px solid var(--line);
+                 background: var(--panel); color: var(--muted); }
+button.discard:hover { color: var(--ink); border-color: var(--muted); }
 .wheelwrap { display: flex; gap: 26px; align-items: flex-start; flex-wrap: wrap; }
 .wheelbox, .wheelside { margin-top: 4px; }
 .wheelbox { position: relative; width: 240px; height: 240px; flex: 0 0 auto; }
@@ -374,11 +383,20 @@ async function loadLeague() {
 
   const rollFile = await fetch('data/rolls.json', { cache: 'no-store' })
     .then(r => r.ok ? r.json() : null).catch(() => null);
-  const rolls = {};
+  const rolls = {}, localOnly = {};
   Object.entries((rollFile && rollFile.rolls) || {}).forEach(([w, id]) => rolls[Number(w)] = id);
-  Object.entries(localRolls()).forEach(([w, id]) => { if (!rolls[w]) rolls[w] = id; });
+  Object.entries(localRolls()).forEach(([w, id]) => {
+    if (rolls[Number(w)]) return;          // already official, drop the local copy
+    rolls[Number(w)] = id; localOnly[Number(w)] = id;
+  });
+  // a roll that has since been committed no longer needs a local copy
+  try {
+    const lr = localRolls(); let changed = false;
+    Object.keys(lr).forEach(w => { if ((rollFile?.rolls || {})[w]) { delete lr[w]; changed = true; } });
+    if (changed) localStorage.setItem(ROLL_KEY, JSON.stringify(lr));
+  } catch {}
 
-  const L = { state, league, names, slots, weeks, pos, bracket, losers, rosters, rolls };
+  const L = { state, league, names, slots, weeks, pos, bracket, losers, rosters, rolls, localOnly };
   L.extras = await loadExtras(L, rolls);
   return L;
 }
@@ -636,6 +654,32 @@ const recordUrl = (week, pick) => `https://github.com/${REPO}/issues/new?` + new
 /* The wheel. Anyone can spin it for the next unrolled week; the result has to be
    written into docs/data/rolls.json to become official, because a page served
    from GitHub Pages has no way to save anything for everyone else. */
+function cardPending(L) {
+  const pend = Object.entries(L.localOnly || {});
+  if (!pend.length) return null;
+  const card = $(`<div class="card pending-card">
+    <h2>Rolled here, not recorded yet</h2>
+    ${pend.map(([wk, id]) => { const c = CH_BY_ID[id] || {};
+      return `<div class="pendrow" data-wk="${wk}">
+        <div><b>Week ${wk}</b> · #${id} ${esc(c.name || '?')}
+          <div class="note">Only this browser can see it. Record it to make it official,
+          or discard it to put #${id} back in the wheel.</div></div>
+        <div class="pendacts">
+          <a class="record" href="${recordUrl(Number(wk), { id, name: c.name || '', note: c.note || '' })}"
+             target="_blank" rel="noopener">Record</a>
+          <button class="discard" data-wk="${wk}">Discard</button>
+        </div></div>`; }).join('')}
+    </div>`);
+  card.addEventListener('click', (e) => {
+    const b = e.target.closest('button.discard');
+    if (!b) return;
+    try { const r = localRolls(); delete r[b.dataset.wk];
+          localStorage.setItem(ROLL_KEY, JSON.stringify(r)); } catch {}
+    run();
+  });
+  return card;
+}
+
 function cardWheel(L, season) {
   const next = season.find(w => !w.challenge && w.week <= SEASON_WEEKS);
   if (!next) return null;
@@ -995,6 +1039,7 @@ function paint(L) {
   const latest = cardLatest(L, season);
   if (latest) app.append(latest); else app.append($(`<div class="card"><div class="empty">
     <strong>No results yet</strong>The first week settles the Tuesday after it wraps up.</div></div>`));
+  const pend = cardPending(L); if (pend) app.append(pend);
   const wheel = cardWheel(L, season); if (wheel) app.append(wheel);
   app.append(cardWeekTable(season));
   cardBracket(L).forEach(c => app.append(c));
