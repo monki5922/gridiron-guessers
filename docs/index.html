@@ -89,6 +89,16 @@ tr.unrolled .wk { color: var(--muted); }
 
 /* Ranked winnings chart. One series -> one fill; bar length is the only
    magnitude channel, and values stay in text tokens, never the fill colour. */
+.prizerow { display: grid; gap: 10px; margin: 2px 0 20px;
+             grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); }
+.ptile { border: 1px solid var(--line); border-radius: 10px; padding: 12px 13px; }
+.ptile .plabel { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+                 color: var(--muted); font-weight: 600; }
+.ptile .pamt { font-size: 21px; font-weight: 650; margin-top: 5px;
+               letter-spacing: -0.01em; }
+.ptile.p1 { border-color: var(--gold); background: var(--gold-soft); }
+.ptile.p1 .plabel, .ptile.p1 .pamt { color: var(--gold); }
+.ptile.weekly { border-style: dashed; }
 .pot { margin: -4px 0 18px; }
 .potline { display: flex; justify-content: space-between; align-items: baseline;
            font-size: 12.5px; color: var(--muted); margin-bottom: 7px; gap: 12px; }
@@ -266,6 +276,8 @@ const API = 'https://api.sleeper.app/v1';
 const HIGH_SCORE_PRIZE = 0, CHALLENGE_PRIZE = 10.00, SEASON_WEEKS = 17;
 const BUY_IN = 30.00, LEAGUE_SIZE = 12;
 const SEASON_PRIZES = { 1: 100, 2: 60, 3: 30 };
+const SEASON_TOTAL_WEEKLY = CHALLENGE_PRIZE * SEASON_WEEKS;
+const WEEKLY_LABEL = `Weekly · ${SEASON_WEEKS} wks`;
 const HAS_HIGH_SCORE = HIGH_SCORE_PRIZE > 0;
 const POS_KEY = 'gg.playermeta.v2', SNAP_KEY = 'gg.snapshot.v1';
 /* Game-level facts (kickoff slot, overtime) are not in Sleeper, so the two
@@ -919,6 +931,13 @@ function cardWinnings(rows) {
   };
 
   const card = $(`<div class="card"><h2>Total winnings</h2>
+    <div class="prizerow">
+      ${[[1, '1st place'], [2, '2nd place'], [3, '3rd place']].map(([n, label]) => `
+        <div class="ptile p${n}"><div class="plabel">${label}</div>
+          <div class="pamt">${money(SEASON_PRIZES[n])}</div></div>`).join('')}
+      <div class="ptile weekly"><div class="plabel">${WEEKLY_LABEL}</div>
+        <div class="pamt">${money(SEASON_TOTAL_WEEKLY)}</div></div>
+    </div>
     <div class="pot">
       <div class="potline"><span><b>${usd(paid)}</b> of ${usd(POT)} paid out</span>
         <span>${usd(POT - paid)} still in the pot</span></div>
@@ -926,9 +945,8 @@ function cardWinnings(rows) {
     </div>
     ${rows.map(row).join('')}
     <div class="note" style="margin-top:14px;color:var(--muted);font-size:13px">
-      Bars are scaled to the current leader. Season prizes (1st ${money(SEASON_PRIZES[1])},
-      2nd ${money(SEASON_PRIZES[2])}, 3rd ${money(SEASON_PRIZES[3])}) are settled after the
-      playoffs and are not counted here.</div></div>`);
+      Bars are scaled to the current leader. The three season prizes above are
+      settled by hand after the playoffs and are not counted in these totals.</div></div>`);
 
   // fill on scroll-in; honour reduced-motion by painting the final state at once
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
