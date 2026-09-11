@@ -252,7 +252,13 @@ const HIGH_SCORE_PRIZE = 0, CHALLENGE_PRIZE = 10.00, SEASON_WEEKS = 17;
 const BUY_IN = 30.00, LEAGUE_SIZE = 12;
 const SEASON_PRIZES = { 1: 100, 2: 60, 3: 30 };
 const HAS_HIGH_SCORE = HIGH_SCORE_PRIZE > 0;
-const POS_KEY = 'ffp.positions.v1', SNAP_KEY = 'ffp.snapshot.v1';
+const POS_KEY = 'gg.playermeta.v2', SNAP_KEY = 'gg.snapshot.v1';
+/* Game-level facts (kickoff slot, overtime) are not in Sleeper, so the two
+   challenges that need them read ESPN's public scoreboard. Only the week that
+   drew such a challenge fetches it. */
+const ESPN = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
+const TEAM_ALIAS = { WSH: 'WAS', OAK: 'LV', LA: 'LAR', JAC: 'JAX' };
+const team = (t) => TEAM_ALIAS[t] || t;
 
 const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstChild; };
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -283,9 +289,33 @@ async function loadPositions(force) {
   } catch {}
   const all = await j(`${API}/players/nfl`);
   const map = {};
-  for (const pid in all) { const p = all[pid] && all[pid].position; if (p) map[pid] = p; }
+  for (const pid in all) {
+    const p = all[pid];
+    if (p && p.position) map[pid] = { p: p.position, t: p.team ? team(p.team) : null };
+  }
   try { localStorage.setItem(POS_KEY, JSON.stringify({ at: Date.now(), map })); } catch {}
   return map;
+}
+
+/* Which teams played in a night game, and which went to overtime. */
+async function loadGames(season, week) {
+  const d = await j(`${ESPN}?seasontype=2&week=${week}&dates=${season}`).catch(() => null);
+  const prime = new Set(), ot = new Set();
+  const et = (iso) => {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York',
+      weekday: 'short', hour: 'numeric', hour12: false }).formatToParts(new Date(iso));
+    const o = Object.fromEntries(parts.map(x => [x.type, x.value]));
+    return { day: o.weekday, hour: Number(o.hour) };
+  };
+  for (const e of (d && d.events) || []) {
+    const c = e.competitions && e.competitions[0];
+    if (!c) continue;
+    const teams = (c.competitors || []).map(x => team(x.team && x.team.abbreviation)).filter(Boolean);
+    const { day, hour } = et(e.date);
+    if (day === 'Thu' || day === 'Mon' || (day === 'Sun' && hour >= 19)) teams.forEach(t => prime.add(t));
+    if ((c.status || {}).period > 4) teams.forEach(t => ot.add(t));
+  }
+  return { prime, ot };
 }
 
 /* ------------------------------- league -------------------------------- */
@@ -329,6 +359,8 @@ async function loadLeague() {
 /* ----------------------------- challenges ------------------------------ */
 const starterPts = (m) => (m.starters || []).map(pid => [pid, (m.players_points || {})[pid] ?? 0]);
 const played = (ms) => ms.filter(m => m.points > 0);
+const POS = (L, pid) => (L.pos[pid] || {}).p || null;
+const TEAM = (L, pid) => (L.pos[pid] || {}).t || null;
 const benchPts = (m) => { const s = new Set(m.starters || []);
   return Object.entries(m.players_points || {}).filter(([pid]) => !s.has(pid)); };
 
@@ -346,7 +378,7 @@ function optimal(m, slots, pos) {
   let total = 0; const flex = [];
   const take = (ok) => {
     let best = null;
-    for (const pid in pool) if (ok(pos[pid] || '?') && (best === null || pool[pid] > pool[best])) best = pid;
+    for (const pid in pool) if (ok((pos[pid] || {}).p || '?') && (best === null || pool[pid] > pool[best])) best = pid;
     if (best !== null) { total += pool[best]; delete pool[best]; }
   };
   for (const s of slots) { if (FLEX_ELIG[s]) { flex.push(s); continue; } take(p => p === s); }
@@ -356,7 +388,7 @@ function optimal(m, slots, pos) {
 
 const topPos = (position) => (L, ms) => ms.map(m => ({
   name: L.names[m.roster_id],
-  value: Math.max(0, ...starterPts(m).filter(([pid]) => L.pos[pid] === position).map(([, p]) => p)) }));
+  value: Math.max(0, ...starterPts(m).filter(([pid]) => POS(L, pid) === position).map(([, p]) => p)) }));
 
 /* The league's 17 challenges. One is drawn on the wheel each week, so only the
    drawn one is computed - which is also why the few that need extra Sleeper
@@ -388,16 +420,16 @@ const CHALLENGES = [
   { id: 5, name: 'Kicker Uprising', note: 'Most of your own RB/WR/TE starters outscored by your kicker',
     fmt: v => `${v.toFixed(0)} outscored by the kicker`,
     rows: (L, ms) => played(ms).map(m => { const sp = starterPts(m);
-      const k = Math.max(0, ...sp.filter(([pid]) => L.pos[pid] === 'K').map(([, p]) => p));
+      const k = Math.max(0, ...sp.filter(([pid]) => POS(L, pid) === 'K').map(([, p]) => p));
       return { name: L.names[m.roster_id],
-        value: sp.filter(([pid, p]) => ['RB','WR','TE'].includes(L.pos[pid]) && p < k).length }; }) },
+        value: sp.filter(([pid, p]) => ['RB','WR','TE'].includes(POS(L, pid)) && p < k).length }; }) },
 
   { id: 6, name: "Backup's Revenge", note: 'Largest margin by which a benched player beat your starter at his position',
     fmt: v => `${n2(v)} better off the bench`,
     rows: (L, ms) => played(ms).map(m => { const sp = starterPts(m), bp = benchPts(m);
       let best = 0;
-      for (const [bpid, bv] of bp) { const pos = L.pos[bpid]; if (!pos) continue;
-        for (const [spid, sv] of sp) if (L.pos[spid] === pos) best = Math.max(best, bv - sv); }
+      for (const [bpid, bv] of bp) { const pos = POS(L, bpid); if (!pos) continue;
+        for (const [spid, sv] of sp) if (POS(L, spid) === pos) best = Math.max(best, bv - sv); }
       return { name: L.names[m.roster_id], value: best }; }) },
 
   { id: 7, name: 'The Coin Flip', note: 'Closest single loss across the entire league that week', low: true,
@@ -419,15 +451,22 @@ const CHALLENGES = [
   { id: 10, name: 'The Understudy', note: 'Largest margin by which your D/ST outscored one of your skill starters',
     fmt: v => `D/ST by ${n2(v)}`,
     rows: (L, ms) => played(ms).map(m => { const sp = starterPts(m);
-      const d = Math.max(0, ...sp.filter(([pid]) => L.pos[pid] === 'DEF').map(([, p]) => p));
-      const skill = sp.filter(([pid]) => ['QB','RB','WR','TE'].includes(L.pos[pid])).map(([, p]) => p);
+      const d = Math.max(0, ...sp.filter(([pid]) => POS(L, pid) === 'DEF').map(([, p]) => p));
+      const skill = sp.filter(([pid]) => ['QB','RB','WR','TE'].includes(POS(L, pid))).map(([, p]) => p);
       return { name: L.names[m.roster_id], value: skill.length ? d - Math.min(...skill) : 0 }; }) },
 
-  { id: 11, name: 'Prime Time Flop', note: 'Lowest combined score from starters who played Thu/Sun night/Mon night',
-    manual: 'Sleeper does not say which game slot a player played in' },
+  { id: 11, name: 'Prime Time Flop', note: 'Lowest combined score from your starters in Thu / Sun night / Mon night games',
+    low: true, needs: 'games', fmt: v => `${n2(v)} in prime time`,
+    rows: (L, ms, x) => played(ms).map(m => {
+      const sp = starterPts(m).filter(([pid]) => x.games.prime.has(TEAM(L, pid)));
+      return sp.length ? { name: L.names[m.roster_id], value: sp.reduce((a, [, p]) => a + p, 0) } : null;
+    }).filter(Boolean) },
 
-  { id: 12, name: 'Red Zone Robbery', note: 'Most fantasy points given up to an opposing D/ST',
-    manual: 'Sleeper does not attribute points conceded to a defense back to individual players' },
+  { id: 12, name: 'Red Zone Robbery', note: 'Most D/ST points your starters handed the other side - picks and fumbles 2 each, sacks 1',
+    needs: 'stats', fmt: v => `${n2(v)} gifted to defenses`,
+    rows: (L, ms, x) => ms.map(m => ({ name: L.names[m.roster_id],
+      value: (m.starters || []).reduce((a, pid) => { const st = x.stats[pid] || {};
+        return a + (st.pass_int || 0) * 2 + (st.fum_lost || 0) * 2 + (st.pass_sack || 0); }, 0) })) },
 
   { id: 13, name: 'The Ghost', note: 'Lowest score by a starter who actually took the field', low: true, needs: 'stats',
     fmt: v => `${n2(v)} from a starter who played`,
@@ -436,8 +475,11 @@ const CHALLENGES = [
       return { name: L.names[m.roster_id], value: vals.length ? Math.min(...vals) : null }; })
       .filter(r => r.value !== null) },
 
-  { id: 14, name: 'Overtime Bonus', note: 'Most points from starters in games that went to overtime',
-    manual: 'Sleeper does not flag which games went to overtime' },
+  { id: 14, name: 'Overtime Bonus', note: 'Most points from your starters whose game went to overtime',
+    needs: 'games', fmt: v => `${n2(v)} from overtime games`,
+    rows: (L, ms, x) => played(ms).map(m => ({ name: L.names[m.roster_id],
+      value: starterPts(m).filter(([pid]) => x.games.ot.has(TEAM(L, pid)))
+        .reduce((a, [, p]) => a + p, 0) })) },
 
   { id: 15, name: 'Waiver Wire Miracle', note: 'Highest single-week score from a player you added that same week', needs: 'tx',
     fmt: v => `${n2(v)} from a fresh pickup`,
@@ -475,7 +517,7 @@ function winners(rows, low) {
 /* Only the challenge drawn for a week is computed, so the extra endpoints a
    couple of them need are fetched for those weeks alone. */
 async function loadExtras(L, rolls) {
-  const need = { stats: [], tx: [] };
+  const need = { stats: [], tx: [], games: [] };
   for (const [wk, id] of Object.entries(rolls)) {
     const c = CH_BY_ID[id];
     const w = Number(wk);
@@ -488,6 +530,9 @@ async function loadExtras(L, rolls) {
     ...need.stats.map(async w => {
       const st = await j(`${API}/stats/nfl/regular/${L.state.season}/${w}`).catch(() => ({}));
       (extras[w] = extras[w] || {}).stats = st || {};
+    }),
+    ...need.games.map(async w => {
+      (extras[w] = extras[w] || {}).games = await loadGames(L.state.season, w);
     }),
     ...need.tx.map(async w => {
       const tx = await j(`${API}/league/${LEAGUE_ID}/transactions/${w}`).catch(() => []);
@@ -517,7 +562,8 @@ function settle(L) {
     let ch = { names: [], best: null }, board = [];
     const manual = c && c.manual ? c.manual : null;
     if (done && !manual) {
-      const x = (L.extras || {})[week] || { stats: {}, added: {} };
+      const x = Object.assign({ stats: {}, added: {}, games: { prime: new Set(), ot: new Set() } },
+                             (L.extras || {})[week]);
       board = (c.rows(L, ms, x) || []).sort((a, b) => c.low ? a.value - b.value : b.value - a.value);
       ch = winners(board, c.low);
     }
