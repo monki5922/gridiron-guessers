@@ -1,6 +1,7 @@
 {
   "_comment": "week -> challenge id, as rolled on the wheel. Add a line each Tuesday.",
   "rolls": {
-    "1": 17
+    "1": 17,
+    "5": 3
   }
 }
