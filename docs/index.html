@@ -229,6 +229,9 @@ nav button[aria-current="true"] {
 }
 .empty { color: var(--muted); text-align: center; padding: 40px 20px; }
 .empty strong { display: block; color: var(--ink); font-size: 16px; margin-bottom: 6px; }
+table.live tr.win td:first-child::after { content: "leading"; }
+.chip.live { color: var(--gold); background: var(--gold-soft); margin-left: 9px;
+             vertical-align: middle; text-transform: none; letter-spacing: 0; }
 footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 32px; }
 .scroll { overflow-x: auto; }
 .sched { min-width: 520px; }
@@ -639,15 +642,16 @@ function settle(L) {
     const past = now >= lock.getTime();
     const c = CH_BY_ID[rolls[week]] || null;
     const done = past && scored && !!c;
+    const live = scored && !done && !!c;        // playing right now
     let ch = { names: [], best: null }, board = [];
     const manual = c && c.manual ? c.manual : null;
-    if (done && !manual) {
+    if ((done || live) && !manual) {
       const x = Object.assign({ stats: {}, added: {}, games: { prime: new Set(), ot: new Set() } },
                              (L.extras || {})[week]);
       board = (c.rows(L, ms, x) || []).sort((a, b) => c.low ? a.value - b.value : b.value - a.value);
       ch = winners(board, c.low);
     }
-    out.push({ week, lock, past, scored, done, manual, matchups: ms,
+    out.push({ week, lock, past, scored, done, live, manual, matchups: ms,
                challenge: c, title: c ? c.name : null, note: c ? c.note : null,
                fmt: c && c.fmt ? c.fmt : (v => n2(v)),
                high: { names: [], best: null }, chal: ch, board });
@@ -859,24 +863,27 @@ function cardWeekTable(season) {
 }
 
 function cardLatest(L, season) {
-  const done = season.filter(w => w.done);
-  if (!done.length) return null;
-  const w = done[done.length - 1];
+  const shown = season.filter(w => w.done || w.live);
+  if (!shown.length) return null;
+  const w = shown[shown.length - 1];
+  const live = !!w.live;
+  const verb = live ? 'leading' : 'won';
 
   const prize = (kind, label, res, detail) => {
     const pot = kind === 'hs' ? HIGH_SCORE_PRIZE : CHALLENGE_PRIZE;
     const share = res.names.length > 1
       ? ` · ${res.names.length}-way tie, ${money(pot / res.names.length)} each` : '';
-    return `<div class="prize ${kind}"><div class="label">${esc(label)} · ${money(pot)}</div>
-      <div class="who">${res.names.length ? esc(res.names.join(', ')) : 'No winner'}</div>
-      <div class="detail">${res.names.length ? esc(detail) + share : 'nobody qualified this week'}</div></div>`;
+    return `<div class="prize ${kind}"><div class="label">${esc(label)} · ${money(pot)}${live ? ' · leading' : ''}</div>
+      <div class="who">${res.names.length ? esc(res.names.join(', ')) : (live ? 'Nobody yet' : 'No winner')}</div>
+      <div class="detail">${res.names.length ? esc(detail) + (live ? '' : share)
+        : (live ? 'no scores in yet' : 'nobody qualified this week')}</div></div>`;
   };
 
   /* One leaderboard builder for both views: rank, manager, value, with the
      week's winners flagged. */
   const board = (rows, valueHead, fmtVal, winners) => {
     const win = new Set(winners.map(n => n.split(' (wk')[0]));
-    return `<div class="scroll lb"><table>
+    return `<div class="scroll lb"><table class="${live ? 'live' : ''}">
       <thead><tr><th class="rank">#</th><th>Manager</th><th class="n">${esc(valueHead)}</th></tr></thead>
       <tbody>${rows.map((r, i) => `<tr class="${win.has(r.name) ? 'win' : ''}">
         <td class="rank">${i + 1}</td><td>${esc(r.name)}</td>
@@ -892,7 +899,8 @@ function cardLatest(L, season) {
     ? board(chalRows, 'Result', w.fmt, w.chal.names)
     : `<div class="empty" style="padding:22px 0">Nothing to rank for this challenge.</div>`;
 
-  const card = $(`<div class="card"><h2>Week ${w.week} — latest result</h2>
+  const card = $(`<div class="card"><h2>Week ${w.week} — ${live ? 'in progress' : 'latest result'}
+      ${live ? `<span class="chip live">live · settles ${w.lock.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>` : ''}</h2>
     <div class="prizes"${HAS_HIGH_SCORE ? '' : ' style="grid-template-columns:1fr"'}>
       ${HAS_HIGH_SCORE ? prize('hs', 'High score', w.high, w.high.best === null ? '' : `${n2(w.high.best)} pts`) : ''}
       ${prize('ch', w.title, w.chal, w.chal.best === null ? '' : w.fmt(w.chal.best))}
