@@ -823,6 +823,7 @@ function cardWeekTable(season) {
     const chip = !w.challenge ? '<span class="chip up">not rolled yet</span>'
       : w.manual ? '<span class="chip man">commissioner settles</span>'
       : (next && w.week === next.week ? '<span class="chip up">up next</span>' : '');
+    // (the row's own highlight is applied below via isNow)
     const body = !w.challenge
       ? '<span class="pending">waiting on the wheel</span>'
       : `<span class="title">#${w.challenge.id} ${esc(w.title)}</span>${chip}
@@ -831,7 +832,8 @@ function cardWeekTable(season) {
            ? `<span class="pending">${esc(w.manual)}</span>`
            : cell(w.chal.names) + (w.done && w.chal.best !== null && w.chal.names.length
                ? ` <span class="pending">· ${esc(w.fmt(w.chal.best))}</span>` : '')}</div>`;
-    return `<tr class="${w.done ? 'done' : ''}${!w.challenge ? ' unrolled' : ''}">
+    const isNow = next && w.week === next.week;
+    return `<tr class="${w.done ? 'done' : ''}${isNow ? ' now' : ''}${!w.challenge ? ' unrolled' : ''}">
       <td class="wk">Wk ${w.week}</td>
       ${HAS_HIGH_SCORE ? `<td>${cell(w.high.names)}</td>` : ''}
       <td>${!w.challenge ? chip + body : body}</td>
